@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 class Formsurvey extends StatefulWidget {
   // Jika survey == null, maka mode Tambah
@@ -22,10 +25,8 @@ class _SurveyFormPageState extends State<Formsurvey> {
   // 1. STATE & CONTROLLER
   // ==========================================
 
-  // Key untuk validasi form
   final formKey = GlobalKey<FormState>();
 
-  // Controller untuk input teks
   final titleController = TextEditingController();
   final descriptionController = TextEditingController();
   final latitudeController = TextEditingController();
@@ -44,21 +45,96 @@ class _SurveyFormPageState extends State<Formsurvey> {
   // Status proses simpan
   bool isSubmitting = false;
 
-  // Mengetahui apakah mode edit atau tambah
   bool get isEdit => widget.survey != null;
 
-  // Warna utama aplikasi
+  // Peta (OpenStreetMap lewat flutter_map)
+  final MapController mapController = MapController();
+  LatLng _selectedLatLng = const LatLng(-6.200000, 106.816666);
+  bool hasMarker = false; // penanda hanya tampil setelah lokasi dipilih
+  bool isLoadingLocation = false;
+
   static const Color primaryColor = Color.fromARGB(255, 0, 150, 10);
 
   // ==========================================
-  // 2. LIFECYCLE METHOD
+  // 2. LOKASI
+  // ==========================================
+
+  // Dipanggil saat peta diketuk atau GPS ditekan: isi kolom + pindahkan penanda
+  void _updateMarker(LatLng position) {
+    setState(() {
+      _selectedLatLng = position;
+      hasMarker = true;
+      latitudeController.text = position.latitude.toStringAsFixed(7);
+      longitudeController.text = position.longitude.toStringAsFixed(7);
+    });
+  }
+
+  // Dipanggil saat pengguna mengetik koordinat manual:
+  // tidak menulis ulang kolom teks supaya kursor tidak lompat
+  void _moveMarkerFromInput() {
+    final lat = double.tryParse(latitudeController.text.trim());
+    final lng = double.tryParse(longitudeController.text.trim());
+    if (lat == null || lng == null) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+    final pos = LatLng(lat, lng);
+    setState(() {
+      _selectedLatLng = pos;
+      hasMarker = true;
+    });
+    try {
+      mapController.move(pos, mapController.camera.zoom);
+    } catch (_) {
+      // peta belum siap, abaikan
+    }
+  }
+
+  // Mengambil lokasi GPS perangkat saat ini
+  Future<void> _getCurrentLocation() async {
+    setState(() => isLoadingLocation = true);
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw Exception('Layanan GPS perangkat tidak aktif.');
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw Exception('Izin lokasi ditolak.');
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw Exception('Izin lokasi ditolak secara permanen di pengaturan.');
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      final current = LatLng(position.latitude, position.longitude);
+      _updateMarker(current);
+      mapController.move(current, 16.0);
+    } catch (e) {
+      showErrorSnackBar(e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) {
+        setState(() => isLoadingLocation = false);
+      }
+    }
+  }
+
+  // ==========================================
+  // 3. LIFECYCLE METHOD
   // ==========================================
 
   @override
   void initState() {
     super.initState();
 
-    // 1. Jika mode edit, isi form dengan data yang sudah ada
+    // Mode edit: isi form dengan data yang sudah ada
     if (isEdit) {
       final s = widget.survey!;
       titleController.text = s['title']?.toString() ?? '';
@@ -68,6 +144,13 @@ class _SurveyFormPageState extends State<Formsurvey> {
 
       selectedCategoryId = int.tryParse(s['category_id']?.toString() ?? '');
 
+      final lat = double.tryParse(s['latitude']?.toString() ?? '');
+      final lng = double.tryParse(s['longitude']?.toString() ?? '');
+      if (lat != null && lng != null) {
+        _selectedLatLng = LatLng(lat, lng);
+        hasMarker = true;
+      }
+
       final photoName = s['photo']?.toString();
       if (photoName != null &&
           photoName.isNotEmpty &&
@@ -76,7 +159,6 @@ class _SurveyFormPageState extends State<Formsurvey> {
       }
     }
 
-    // 2. Ambil daftar kategori dari server
     fetchCategories();
   }
 
@@ -86,11 +168,12 @@ class _SurveyFormPageState extends State<Formsurvey> {
     descriptionController.dispose();
     latitudeController.dispose();
     longitudeController.dispose();
+    mapController.dispose();
     super.dispose();
   }
 
   // ==========================================
-  // 3. REST API: MENGAMBIL DAFTAR KATEGORI & GAMBAR
+  // 4. REST API: KATEGORI & GAMBAR
   // ==========================================
 
   Future<void> fetchCategories() async {
@@ -136,9 +219,8 @@ class _SurveyFormPageState extends State<Formsurvey> {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('token') ?? '';
 
-      final fileName = photoName.contains('/')
-          ? photoName.split('/').last
-          : photoName;
+      final fileName =
+          photoName.contains('/') ? photoName.split('/').last : photoName;
       final response = await http.get(
         Uri.parse('https://sijala.biz.id/api/image/$fileName'),
         headers: {
@@ -157,7 +239,7 @@ class _SurveyFormPageState extends State<Formsurvey> {
   }
 
   // ==========================================
-  // 4. PEMILIHAN FOTO (KAMERA / GALERI)
+  // 5. PEMILIHAN FOTO (KAMERA / GALERI)
   // ==========================================
 
   Future<void> pickImage(ImageSource source) async {
@@ -191,7 +273,6 @@ class _SurveyFormPageState extends State<Formsurvey> {
     });
   }
 
-  // Menampilkan pilihan Kamera atau Galeri
   void showImageSourceDialog() {
     showModalBottomSheet(
       context: context,
@@ -233,11 +314,10 @@ class _SurveyFormPageState extends State<Formsurvey> {
   }
 
   // ==========================================
-  // 5. REST API: MENYIMPAN SURVEY (POST / PUT MULTIPART)
+  // 6. REST API: MENYIMPAN SURVEY
   // ==========================================
 
   Future<void> saveSurvey() async {
-    // 1. Validasi Input Form
     if (!formKey.currentState!.validate()) {
       showErrorSnackBar('Lengkapi data yang wajib diisi.');
       return;
@@ -266,15 +346,12 @@ class _SurveyFormPageState extends State<Formsurvey> {
         return;
       }
 
-      // 2. Membuat Request Multipart HTTP
       final uri = Uri.parse('https://sijala.biz.id/api/v1/surveys/save');
       final request = http.MultipartRequest('POST', uri);
 
-      // Header
       request.headers['Accept'] = 'application/json';
       request.headers['Authorization'] = 'Bearer $token';
 
-      // Field Teks
       request.fields['title'] = titleController.text.trim();
       request.fields['category_id'] = selectedCategoryId.toString();
       request.fields['description'] = descriptionController.text.trim();
@@ -286,13 +363,11 @@ class _SurveyFormPageState extends State<Formsurvey> {
         request.fields['longitude'] = longitudeController.text.trim();
       }
 
-      // Jika Edit: Tambahkan ID dan Method Spoofing PUT
       if (isEdit) {
         request.fields['id'] = widget.survey!['id'].toString();
         request.fields['_method'] = 'PUT';
       }
 
-      // Jika ada file foto baru
       if (selectedImage != null && selectedImageBytes != null) {
         request.files.add(
           http.MultipartFile.fromBytes(
@@ -303,11 +378,9 @@ class _SurveyFormPageState extends State<Formsurvey> {
         );
       }
 
-      // 3. Mengirim Data ke Server
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
 
-      // 4. Memproses Response
       if (response.statusCode == 200 || response.statusCode == 201) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -321,12 +394,10 @@ class _SurveyFormPageState extends State<Formsurvey> {
           ),
         );
 
-        // Kembali ke halaman sebelumnya dan muat ulang
         Navigator.pop(context, true);
         return;
       }
 
-      // Jika validasi server gagal (422)
       if (response.statusCode == 422) {
         final decoded = jsonDecode(response.body);
         final message = decoded['message'] ?? 'Data yang dikirim tidak valid.';
@@ -347,13 +418,14 @@ class _SurveyFormPageState extends State<Formsurvey> {
   }
 
   void showErrorSnackBar(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: const Color(0xFFEF4444)),
     );
   }
 
   // ==========================================
-  // 6. BUILD TAMPILAN WIDGET (UI)
+  // 7. BUILD TAMPILAN WIDGET (UI)
   // ==========================================
 
   @override
@@ -396,7 +468,6 @@ class _SurveyFormPageState extends State<Formsurvey> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Input Judul
                       const Text(
                         'Judul Survey *',
                         style: TextStyle(
@@ -421,7 +492,6 @@ class _SurveyFormPageState extends State<Formsurvey> {
                       ),
                       const SizedBox(height: 16),
 
-                      // Dropdown Kategori
                       const Text(
                         'Kategori Survey *',
                         style: TextStyle(
@@ -463,7 +533,6 @@ class _SurveyFormPageState extends State<Formsurvey> {
                         ),
                       const SizedBox(height: 16),
 
-                      // Input Deskripsi
                       const Text(
                         'Deskripsi Survey',
                         style: TextStyle(
@@ -510,7 +579,6 @@ class _SurveyFormPageState extends State<Formsurvey> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Preview Foto
                       if (selectedImageBytes != null ||
                           existingImageBytes != null)
                         Column(
@@ -584,7 +652,7 @@ class _SurveyFormPageState extends State<Formsurvey> {
               ),
               const SizedBox(height: 16),
 
-              // KARTU 3: LOKASI SURVEY (LATITUDE & LONGITUDE)
+              // KARTU 3: LOKASI SURVEY DENGAN PETA (OpenStreetMap)
               Card(
                 elevation: 0,
                 color: Colors.white,
@@ -605,7 +673,75 @@ class _SurveyFormPageState extends State<Formsurvey> {
                           color: Color(0xFF0F172A),
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
+
+                      // 1. PETA: ketuk untuk memilih lokasi
+                      SizedBox(
+                        height: 220,
+                        width: double.infinity,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: FlutterMap(
+                            mapController: mapController,
+                            options: MapOptions(
+                              initialCenter: _selectedLatLng,
+                              initialZoom: 15.0,
+                              onTap: (tapPosition, point) {
+                                _updateMarker(point);
+                              },
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate:
+                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'biz.sijala.app',
+                              ),
+                              if (hasMarker)
+                                MarkerLayer(
+                                  markers: [
+                                    Marker(
+                                      point: _selectedLatLng,
+                                      width: 40,
+                                      height: 40,
+                                      alignment: Alignment.topCenter,
+                                      child: const Icon(
+                                        Icons.location_pin,
+                                        color: Colors.red,
+                                        size: 40,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // 2. TOMBOL GPS
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton.icon(
+                            onPressed:
+                                isLoadingLocation ? null : _getCurrentLocation,
+                            icon: isLoadingLocation
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.my_location,
+                                    size: 16, color: primaryColor),
+                            label: const Text('GPS Saya',
+                                style: TextStyle(color: primaryColor)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 3. INPUT LATITUDE & LONGITUDE
                       Row(
                         children: [
                           Expanded(
@@ -613,15 +749,16 @@ class _SurveyFormPageState extends State<Formsurvey> {
                               controller: latitudeController,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                    signed: true,
-                                  ),
+                                decimal: true,
+                                signed: true,
+                              ),
                               decoration: const InputDecoration(
                                 labelText: 'Latitude',
-                                hintText: '-7.3274000',
+                                hintText: '-6.2000000',
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.my_location),
                               ),
+                              onChanged: (_) => _moveMarkerFromInput(),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -630,15 +767,16 @@ class _SurveyFormPageState extends State<Formsurvey> {
                               controller: longitudeController,
                               keyboardType:
                                   const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                    signed: true,
-                                  ),
+                                decimal: true,
+                                signed: true,
+                              ),
                               decoration: const InputDecoration(
                                 labelText: 'Longitude',
-                                hintText: '108.2207000',
+                                hintText: '106.8166660',
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.explore),
                               ),
+                              onChanged: (_) => _moveMarkerFromInput(),
                             ),
                           ),
                         ],

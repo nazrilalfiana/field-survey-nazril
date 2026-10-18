@@ -147,23 +147,11 @@ class _RegisterPageState extends State<RegisterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // 1. BACKGROUND PEMANDANGAN
           Container(
-            decoration: const BoxDecoration(
-              image: DecorationImage(
-                image: NetworkImage(
-                  'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=1000&auto=format&fit=crop',
-                ),
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-
-          // OVERLAY GELAP
-          Container(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black,
           ),
 
           // 2. FORM GLASSMORPHISM
@@ -194,7 +182,7 @@ class _RegisterPageState extends State<RegisterPage> {
                             const Icon(
                               Icons.person_add_rounded,
                               size: 70,
-                              color: Colors.white,
+                              color: Colors.blue,
                             ),
                             const SizedBox(height: 12),
                             const Text(
@@ -203,7 +191,7 @@ class _RegisterPageState extends State<RegisterPage> {
                               style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.white,
+                                color: Colors.blue,
                                 letterSpacing: 1.2,
                               ),
                             ),

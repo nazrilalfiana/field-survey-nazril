@@ -69,7 +69,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
               // Title
               const Text(
-                'SIJALA',
+                'Field Survey',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,

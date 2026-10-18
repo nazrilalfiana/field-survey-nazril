@@ -12,21 +12,21 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
+    // final _formkey = GlobalKey<FormState>();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscureText = true;
 
   Future<void> _handleLogin() async {
+    // if (!_formkey.currentState!.validate()){
+    //   return;
+    // }
+    if (!_formKey.currentState!.validate()) return;
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Email dan kata sandi wajib diisi!')),
-      );
-      return;
-    }
 
     setState(() => _isLoading = true);
 
@@ -96,7 +96,10 @@ class _LoginPageState extends State<LoginPage> {
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Center(
-          child: SingleChildScrollView(
+          child:  Form(
+            key: _formKey,
+            child: 
+          SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -112,7 +115,7 @@ class _LoginPageState extends State<LoginPage> {
 
                 // JUDUL APLIKASI
                 const Text(
-                  'SIJALA',
+                  'Field Survey',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 28,
@@ -135,7 +138,7 @@ class _LoginPageState extends State<LoginPage> {
                 const SizedBox(height: 36),
 
                 // EMAIL INPUT
-                TextField(
+                TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
@@ -147,11 +150,20 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
                   ),
+                   validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return "Email tidak boleh kosong";
+                      }
+                      if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(value.trim())) {
+                        return "Format email tidak valid";
+                      }
+                      return null;
+                  },
                 ),
                 const SizedBox(height: 16),
 
                 // PASSWORD INPUT
-                TextField(
+                TextFormField(
                   controller: _passwordController,
                   obscureText: _obscureText,
                   decoration: InputDecoration(
@@ -171,6 +183,13 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
                   ),
+                   validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return "password tidak bolleh kosong";
+                      }
+                     
+                      return null;
+                  },
                 ),
                 const SizedBox(height: 24),
 
@@ -231,6 +250,7 @@ class _LoginPageState extends State<LoginPage> {
               ],
             ),
           ),
+          )
         ),
       ),
     );
